@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>シフト表</title>
+<style>
+  :root{
+    --bg:#f5f5f2;
+    --card:#ffffff;
+    --border:#d9d8d2;
+    --text:#2b2b26;
+    --muted:#83817a;
+    --accent:#3d5a6c;
+    --accent-light:#e8eef0;
+    --warn:#c0392b;
+    --warn-bg:#fdecea;
+    --ok:#4a7a5a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:"Hiragino Sans","Yu Gothic",-apple-system,BlinkMacSystemFont,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    font-size:14px;
+    line-height:1.5;
+  }
+  .app{max-width:1180px;margin:0 auto;padding:16px 16px 60px;}
+  h1,h2,h3{margin:0 0 8px;font-weight:700;}
+  .topbar{
+    display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    background:var(--card);border:1px solid var(--border);border-radius:10px;
+    padding:12px 14px;margin-bottom:14px;
+  }
+  .topbar select, .topbar button, .topbar input[type=text]{
+    font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--text);
+  }
+  .topbar button{cursor:pointer;background:var(--accent);color:#fff;border:none;font-weight:600;}
+  .topbar button.secondary{background:#fff;color:var(--accent);border:1px solid var(--accent);}
+  .topbar button.danger{background:#fff;color:var(--warn);border:1px solid var(--warn);}
+  .topbar button:hover{opacity:.88;}
+  .spacer{flex:1 1 auto;}
+
+  .meta-card{
+    background:var(--card);border:1px solid var(--border);border-radius:10px;
+    padding:14px 16px;margin-bottom:14px;
+  }
+  .meta-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;}
+  .meta-row label{font-size:12px;color:var(--muted);display:block;margin-bottom:3px;}
+  .meta-row input[type=text], .meta-row textarea{
+    width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:14px;font-family:inherit;
+  }
+  .meta-title-input{font-size:18px !important;font-weight:700;}
+  .col{flex:1 1 220px;}
+  .col-wide{flex:2 1 400px;}
+
+  #printArea{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;}
+
+  .print-title{font-size:20px;font-weight:700;margin-bottom:2px;}
+  .print-comment{font-size:13px;color:var(--muted);margin-bottom:12px;white-space:pre-wrap;}
+
+  .store-block{margin-bottom:6px;}
+  .store-name-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+  .store-name-input{
+    font-size:16px;font-weight:700;border:1px solid transparent;background:transparent;
+    padding:4px 6px;border-radius:6px;
+  }
+  .store-name-input:hover, .store-name-input:focus{border-color:var(--border);background:#fff;}
+
+  table.shift-table{border-collapse:collapse;width:100%;table-layout:fixed;margin-bottom:2px;}
+  table.shift-table th, table.shift-table td{
+    border:1px solid var(--border);vertical-align:top;padding:6px;
+  }
+  table.shift-table th{
+    background:var(--accent-light);text-align:center;font-size:13px;font-weight:700;color:var(--accent);
+  }
+  table.shift-table th.corner{background:var(--card);}
+  table.shift-table td.ampm-cell{
+    width:46px;text-align:center;font-weight:700;background:var(--accent-light);color:var(--accent);font-size:12px;
+  }
+  table.shift-table td.slot-cell{min-height:70px;min-width:90px;}
+  table.shift-table th.warn, table.shift-table th.day-warn{background:var(--warn-bg);color:var(--warn);}
+
+  .warn-flag{display:inline-block;margin-left:2px;}
+  .warn-tooltip{font-size:10px;color:var(--warn);display:block;margin-top:2px;font-weight:500;}
+
+  .staff-chip{
+    display:flex;align-items:center;justify-content:space-between;gap:4px;
+    background:#f1f1ee;border-radius:5px;padding:2px 5px;margin-bottom:3px;font-size:12.5px;
+  }
+  .staff-chip.dup{background:var(--warn-bg);color:var(--warn);font-weight:700;}
+  .staff-chip .chip-name{cursor:pointer;flex:1;}
+  .staff-chip .chip-time{font-size:10.5px;color:var(--muted);display:block;}
+  .staff-chip.dup .chip-time{color:var(--warn);}
+  .staff-chip .chip-del{cursor:pointer;color:#999;font-weight:700;padding:0 2px;flex-shrink:0;}
+  .staff-chip .chip-del:hover{color:var(--warn);}
+
+  .add-select{width:100%;font-size:12px;padding:3px;border:1px dashed var(--border);border-radius:5px;color:var(--muted);background:#fff;margin-top:2px;}
+
+  .extra-block{
+    background:#fbfbf9;border:1px dashed var(--border);border-radius:8px;padding:10px;margin:8px 0 12px;
+  }
+  .extra-block h3{font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:700;}
+  table.extra-table{border-collapse:collapse;width:100%;table-layout:fixed;}
+  table.extra-table th, table.extra-table td{border:1px solid var(--border);padding:5px;font-size:12px;vertical-align:top;}
+  table.extra-table th{background:#f0efe9;text-align:center;font-weight:700;}
+  table.extra-table td.cat-cell{width:70px;font-weight:700;background:#f0efe9;text-align:center;}
+
+  .time-editor{
+    position:absolute;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.12);
+    padding:10px;z-index:50;font-size:12px;
+  }
+  .time-editor input{width:80px;padding:4px;border:1px solid var(--border);border-radius:5px;margin-right:4px;}
+  .time-editor .te-row{margin-bottom:6px;}
+  .time-editor button{font-size:11px;padding:4px 8px;border-radius:5px;border:1px solid var(--border);background:#fff;cursor:pointer;margin-right:4px;}
+  .time-editor button.primary{background:var(--accent);color:#fff;border:none;}
+
+  details.panel{background:var(--card);border:1px solid var(--border);border-radius:10px;margin-bottom:14px;padding:0;}
+  details.panel summary{cursor:pointer;padding:12px 16px;font-weight:700;list-style:none;display:flex;align-items:center;gap:6px;}
+  details.panel summary::-webkit-details-marker{display:none;}
+  details.panel summary:before{content:"▸";display:inline-block;transition:transform .15s;}
+  details.panel[open] summary:before{transform:rotate(90deg);}
+  .panel-body{padding:0 16px 16px;}
+
+  table.admin-table{border-collapse:collapse;width:100%;font-size:13px;}
+  table.admin-table th, table.admin-table td{border:1px solid var(--border);padding:6px 8px;text-align:left;}
+  table.admin-table th{background:#f0efe9;}
+  table.admin-table input[type=text], table.admin-table input[type=number], table.admin-table input[type=time]{
+    border:1px solid var(--border);border-radius:5px;padding:4px 6px;font-size:13px;width:100%;
+  }
+  .role-tags{display:flex;flex-wrap:wrap;gap:4px;}
+  .role-tag-check{display:inline-flex;align-items:center;gap:3px;background:#f1f1ee;border-radius:12px;padding:2px 8px;font-size:11.5px;cursor:pointer;}
+  .role-tag-check input{margin:0;}
+  .small-btn{font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:#fff;cursor:pointer;}
+  .small-btn.primary{background:var(--accent);color:#fff;border:none;}
+  .small-btn.danger{color:var(--warn);border-color:var(--warn);}
+
+  .toast{
+    position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+    background:#2b2b26;color:#fff;padding:10px 18px;border-radius:20px;font-size:13px;
+    opacity:0;pointer-events:none;transition:opacity .2s;z-index:100;
+  }
+  .toast.show{opacity:1;}
+
+  .status-line{font-size:11px;color:var(--muted);margin-left:4px;}
+
+  /* ---- print ---- */
+  @media print{
+    body *{visibility:hidden;}
+    #printArea, #printArea *{visibility:visible;}
+    #printArea{
+      position:absolute;top:0;left:0;border:none;padding:0;margin:0;
+    }
+    .no-print{display:none !important;}
+    #metaEditArea input, #metaEditArea textarea{
+      border:none !important;padding:2px 0 !important;background:transparent !important;resize:none;
+    }
+    html.print-half #printArea{
+      width:190mm;
+      transform:scale(0.62);
+      transform-origin:top left;
+    }
+    html.print-full #printArea{
+      width:277mm;
+    }
+  }
+</style>
+<style id="dynamicPrintPage"></style>
+</head>
+<body>
+<div class="app">
+  <h1>シフト表</h1>
+
+  <div class="topbar no-print">
+    <div>
+      <label style="font-size:11px;color:var(--muted);display:block;">表示するシフト表</label>
+      <select id="shiftSelect"></select>
+    </div>
+    <button class="secondary" id="btnNew">＋ 新規作成</button>
+    <button class="secondary" id="btnDuplicate">この内容で複製して新規作成</button>
+    <div class="spacer"></div>
+    <span class="status-line" id="statusLine"></span>
+    <button id="btnSave">保存</button>
+    <button class="secondary" id="btnImage">画像として保存(LINE共有用)</button>
+    <button class="secondary" id="btnPrintHalf">印刷:A4縦(上半分)</button>
+    <button class="secondary" id="btnPrintFull">印刷:A4横(全面)</button>
+    <button class="danger" id="btnDelete">この表を削除</button>
+  </div>
+
+  <div id="printArea">
+    <div class="meta-card" style="border:none;padding:0;margin-bottom:10px;" id="metaEditArea">
+      <div class="meta-row">
+        <div class="col-wide">
+          <label>タイトル</label>
+          <input type="text" id="titleInput" class="meta-title-input" placeholder="例）2026.8〜2号店稼働する場合のシフト">
+        </div>
+      </div>
+      <div class="meta-row">
+        <div class="col-wide">
+          <label>コメント（任意）</label>
+          <textarea id="commentInput" rows="2" placeholder="補足があれば入力"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="print-only-meta" style="display:none;">
+      <div class="print-title" id="printTitle"></div>
+      <div class="print-comment" id="printComment"></div>
+    </div>
+
+    <div id="warnSummary"></div>
+
+    <div class="store-block" id="storeBlockA"></div>
+    <div class="extra-block" id="extraBlock"></div>
+    <div class="store-block" id="storeBlockB"></div>
+  </div>
+
+  <details class="panel no-print" id="staffPanel" open>
+    <summary>スタッフ・役職の登録</summary>
+    <div class="panel-body">
+      <h3>役職</h3>
+      <table class="admin-table" id="rolesTable" style="margin-bottom:14px;">
+        <thead><tr><th>役職名</th><th style="width:140px;">各コマの最低人数</th><th style="width:60px;"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="small-btn" id="btnAddRole">＋ 役職を追加</button>
+
+      <h3 style="margin-top:18px;">スタッフ</h3>
+      <table class="admin-table" id="staffTable">
+        <thead><tr><th style="width:140px;">氏名</th><th>役職（複数可）</th><th style="width:110px;">開始</th><th style="width:110px;">終了</th><th style="width:60px;"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <button class="small-btn" id="btnAddStaff">＋ スタッフを追加</button>
+      <div style="margin-top:12px;">
+        <button class="small-btn primary" id="btnSaveStaffRoles">スタッフ・役職を保存</button>
+      </div>
+    </div>
+  </details>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+/* ====== ここを自分のGAS Web AppのURLに変更してください ====== */
+const API_URL = "https://script.google.com/macros/s/https://script.google.com/macros/s/AKfycbyLy8Qa5bURiglZNOxK9HpfxyVBuDKVUUp75gUjrNisO5_OsKGu70-HyrqSKMIrXhlTcQ/exec/exec";
+/* ============================================================ */
+</script>
+<script src="app.js"></script>
+</body>
+</html>
