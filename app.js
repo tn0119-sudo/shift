@@ -5,12 +5,14 @@ const AMPM = ['AM', 'PM'];
 const EXTRA_CATEGORIES = ['送迎', '事務', 'ヘルプ'];
 
 let state = {
-  staff: [],   // {id,name,roles:[],defaultStart,defaultEnd,active}
-  roles: [],   // {name, minCount}
+  staff: [],     // {id,name,roles:[],defaultStart,defaultEnd,active}
+  roles: [],     // {name}
+  minRules: [],  // {id,role,store('' /'A'/'B'),day('' /0-5),ampm('' /'AM'/'PM'),minCount}
   shiftsList: [],
   current: { id: null, title: '', comment: '', storeAName: '大森', storeBName: '高花', basedOn: '' },
-  cells: { A: {}, B: {} },   // key: `${day}_${ampm}` -> [{staffName,startTime,endTime,slotIndex}]
-  extra: {},                 // key: `${day}_${ampm}_${cat}` -> [{staffName,startTime?,endTime?,slotIndex}]
+  cells: { A: {}, B: {} },     // key: `${day}_${ampm}` -> [{staffName,startTime,endTime,slotIndex}]
+  extra: {},                   // key: `${day}_${ampm}_${cat}` -> [{staffName,slotIndex}]
+  closed: { A: {}, B: {} },    // key: `${day}_${ampm}` -> true/false
 };
 
 /* ---------- ユーティリティ ---------- */
@@ -27,6 +29,13 @@ function getExtra(day, ampm, cat) {
   if (!state.extra[k]) state.extra[k] = [];
   return state.extra[k];
 }
+function getClosed(store, day, ampm) {
+  return !!(state.closed[store] && state.closed[store][cellKey(day, ampm)]);
+}
+function setClosed(store, day, ampm, val) {
+  if (!state.closed[store]) state.closed[store] = {};
+  state.closed[store][cellKey(day, ampm)] = val;
+}
 function findStaff(name) { return state.staff.find((s) => s.name === name); }
 
 function toast(msg) {
@@ -34,7 +43,7 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => t.classList.remove('show'), 2200);
+  toast._timer = setTimeout(() => t.classList.remove('show'), 2600);
 }
 
 function setStatus(msg) {
@@ -76,7 +85,11 @@ async function loadInit() {
       defaultStart: s.defaultStart || '', defaultEnd: s.defaultEnd || '',
       active: s.active !== false && s.active !== 'false',
     }));
-    state.roles = (res.roles || []).map((r) => ({ name: r.name, minCount: Number(r.minCount) || 0 }));
+    state.roles = (res.roles || []).map((r) => ({ name: r.name }));
+    state.minRules = (res.minRules || []).map((r) => ({
+      id: r.id, role: r.role || '', store: r.store || '', day: (r.day === 0 ? '0' : (r.day || '')).toString(),
+      ampm: r.ampm || '', minCount: Number(r.minCount) || 0,
+    }));
     state.shiftsList = res.shifts || [];
     renderShiftSelect();
     renderAdminTables();
@@ -88,10 +101,8 @@ async function loadInit() {
     }
     setStatus('');
   } catch (err) {
-    // まだAPI_URLを設定していない/GAS側の準備が済んでいない場合でも、
-    // 画面自体は操作・確認できるようにしておく(保存はできません)。
     console.error(err);
-    toast('データベースに接続できません。まだ画面の確認だけしたい場合はこのまま操作できます(保存は失敗します)。API_URLの設定をご確認ください。');
+    toast('データベースに接続できません。画面の確認だけはこのままできます(保存は失敗します)。API_URLの設定をご確認ください。');
     renderShiftSelect();
     renderAdminTables();
     resetCurrentShift();
@@ -131,6 +142,15 @@ async function loadShift(id) {
   });
   Object.keys(state.extra).forEach((k) => state.extra[k].sort((a, b) => a.slotIndex - b.slotIndex));
 
+  state.closed = { A: {}, B: {} };
+  try {
+    (JSON.parse(meta.closedSlots || '[]') || []).forEach((token) => {
+      const parts = String(token).split('|');
+      const store = parts[0], key = parts[1];
+      if (store && key) { if (!state.closed[store]) state.closed[store] = {}; state.closed[store][key] = true; }
+    });
+  } catch (e) { /* ignore malformed data */ }
+
   document.getElementById('shiftSelect').value = String(id);
   renderShiftArea();
   setStatus('');
@@ -142,6 +162,7 @@ function resetCurrentShift(keepStoreNames) {
   state.current = { id: null, title: '', comment: '', storeAName: prevA, storeBName: prevB, basedOn: '' };
   state.cells = { A: {}, B: {} };
   state.extra = {};
+  state.closed = { A: {}, B: {} };
 }
 
 /* ---------- 保存 ---------- */
@@ -170,6 +191,15 @@ function buildExtraDataPayload() {
   });
   return rows;
 }
+function buildClosedSlotsPayload() {
+  const arr = [];
+  ['A', 'B'].forEach((store) => {
+    Object.keys(state.closed[store] || {}).forEach((k) => {
+      if (state.closed[store][k]) arr.push(store + '|' + k);
+    });
+  });
+  return JSON.stringify(arr);
+}
 
 async function saveShift() {
   if (!state.current.title.trim()) {
@@ -184,6 +214,7 @@ async function saveShift() {
     storeAName: state.current.storeAName,
     storeBName: state.current.storeBName,
     basedOn: state.current.basedOn,
+    closedSlots: buildClosedSlotsPayload(),
     shiftData: buildShiftDataPayload(),
     extraData: buildExtraDataPayload(),
   };
@@ -223,12 +254,11 @@ async function deleteCurrentShift() {
 
 /* ---------- 集計（警告） ---------- */
 function computeDuplicateNames() {
-  // day_ampm -> Set(重複している氏名)
   const dupMap = {};
   DAYS.forEach((_, day) => {
     AMPM.forEach((ampm) => {
-      const namesA = getCell('A', day, ampm).map((e) => e.staffName);
-      const namesB = getCell('B', day, ampm).map((e) => e.staffName);
+      const namesA = getClosed('A', day, ampm) ? [] : getCell('A', day, ampm).map((e) => e.staffName);
+      const namesB = getClosed('B', day, ampm) ? [] : getCell('B', day, ampm).map((e) => e.staffName);
       const setA = new Set(namesA);
       const dup = new Set(namesB.filter((n) => setA.has(n)));
       dupMap[cellKey(day, ampm)] = dup;
@@ -237,20 +267,36 @@ function computeDuplicateNames() {
   return dupMap;
 }
 
+/** 役職ごとの最低人数ルールを、より具体的な条件を優先して解決する */
+function calcMinCount(store, day, ampm, roleName) {
+  const matches = state.minRules.filter((r) => r.role === roleName
+    && (r.store === '' || r.store === store)
+    && (r.day === '' || Number(r.day) === Number(day))
+    && (r.ampm === '' || r.ampm === ampm));
+  if (matches.length === 0) return 0;
+  let best = null, bestScore = -1;
+  matches.forEach((r) => {
+    const score = (r.store !== '' ? 1 : 0) + (r.day !== '' ? 1 : 0) + (r.ampm !== '' ? 1 : 0);
+    if (score >= bestScore) { bestScore = score; best = r; }
+  });
+  return best ? (Number(best.minCount) || 0) : 0;
+}
+
 function computeShortages(store) {
-  // returns { day_ampm: [{role,have,need}] }
   const result = {};
   DAYS.forEach((_, day) => {
     AMPM.forEach((ampm) => {
+      if (getClosed(store, day, ampm)) return; // 休業コマは対象外
       const names = getCell(store, day, ampm).map((e) => e.staffName);
       const shortages = [];
       state.roles.forEach((role) => {
-        if (!role.minCount || role.minCount <= 0) return;
+        const need = calcMinCount(store, day, ampm, role.name);
+        if (!need || need <= 0) return;
         const have = names.filter((n) => {
           const st = findStaff(n);
           return st && st.roles.includes(role.name);
         }).length;
-        if (have < role.minCount) shortages.push({ role: role.name, have, need: role.minCount });
+        if (have < need) shortages.push({ role: role.name, have, need });
       });
       if (shortages.length) result[cellKey(day, ampm)] = shortages;
     });
@@ -278,7 +324,7 @@ function renderShiftSelect() {
   if (state.current.id) sel.value = String(state.current.id);
 }
 
-/* ---------- 描画: メイン領域 ---------- */
+/* ---------- 描画: メイン領域(編集画面) ---------- */
 function renderShiftArea() {
   document.getElementById('titleInput').value = state.current.title;
   document.getElementById('commentInput').value = state.current.comment;
@@ -349,23 +395,29 @@ function renderStoreTable(store, container, dupMap, shortages) {
   AMPM.forEach((ampm) => {
     html += `<tr><td class="ampm-cell">${ampm}</td>`;
     DAYS.forEach((d, day) => {
-      const entries = getCell(store, day, ampm);
-      const dup = dupMap[cellKey(day, ampm)] || new Set();
-      const short = shortages[cellKey(day, ampm)] || [];
+      const closed = getClosed(store, day, ampm);
       html += `<td class="slot-cell">`;
-      entries.forEach((entry, idx) => {
-        const isDup = dup.has(entry.staffName);
-        const timeLabel = entry.startTime || entry.endTime ? `${entry.startTime || '?'}〜${entry.endTime || '?'}` : '';
-        html += `
-          <div class="staff-chip${isDup ? ' dup' : ''}" data-store="${store}" data-day="${day}" data-ampm="${ampm}" data-idx="${idx}">
-            <div class="chip-name" onclick="onChipClick(event)">${escapeHtml(entry.staffName)}${timeLabel ? `<span class="chip-time">${timeLabel}</span>` : ''}</div>
-            <div class="chip-del" onclick="onChipDelete(event)">×</div>
-          </div>`;
-      });
-      if (short.length) {
-        html += `<div class="warn-tooltip">${short.map((s) => s.role + '不足(' + s.have + '/' + s.need + ')').join(' ')}</div>`;
+      html += `<label class="closed-check"><input type="checkbox" data-store="${store}" data-day="${day}" data-ampm="${ampm}" ${closed ? 'checked' : ''} onchange="onToggleClosed(event)"> 休業</label>`;
+      if (closed) {
+        html += `<div class="slot-closed-label">休業</div>`;
+      } else {
+        const entries = getCell(store, day, ampm);
+        const dup = dupMap[cellKey(day, ampm)] || new Set();
+        const short = shortages[cellKey(day, ampm)] || [];
+        entries.forEach((entry, idx) => {
+          const isDup = dup.has(entry.staffName);
+          const timeLabel = entry.startTime || entry.endTime ? `${entry.startTime || '?'}〜${entry.endTime || '?'}` : '';
+          html += `
+            <div class="staff-chip${isDup ? ' dup' : ''}" data-store="${store}" data-day="${day}" data-ampm="${ampm}" data-idx="${idx}">
+              <div class="chip-name" onclick="onChipClick(event)">${escapeHtml(entry.staffName)}${timeLabel ? `<span class="chip-time">${timeLabel}</span>` : ''}</div>
+              <div class="chip-del" onclick="onChipDelete(event)">×</div>
+            </div>`;
+        });
+        if (short.length) {
+          html += `<div class="warn-tooltip">${short.map((s) => s.role + '不足(' + s.have + '/' + s.need + ')').join(' ')}</div>`;
+        }
+        html += `<select class="add-select" data-store="${store}" data-day="${day}" data-ampm="${ampm}" onchange="onAddToCell(event)">${staffOptionListHtml('＋追加')}</select>`;
       }
-      html += `<select class="add-select" data-store="${store}" data-day="${day}" data-ampm="${ampm}" onchange="onAddToCell(event)">${staffOptionListHtml('＋追加')}</select>`;
       html += `</td>`;
     });
     html += '</tr>';
@@ -404,6 +456,74 @@ function renderExtraBlock(container) {
   container.innerHTML = html;
 }
 
+/* ---------- 描画: 画像・印刷用のシンプル表示 ---------- */
+function buildCleanView() {
+  const dupMap = computeDuplicateNames();
+  const shortA = computeShortages('A');
+  const shortB = computeShortages('B');
+  let html = '';
+  html += `<div class="clean-title">${escapeHtml(state.current.title || '(無題)')}</div>`;
+  if (state.current.comment) html += `<div class="clean-comment">${escapeHtml(state.current.comment)}</div>`;
+  html += buildCleanStoreHtml('A', state.current.storeAName, dupMap, shortA);
+  html += buildCleanExtraHtml();
+  html += buildCleanStoreHtml('B', state.current.storeBName, dupMap, shortB);
+  document.getElementById('cleanView').innerHTML = html;
+}
+
+function buildCleanStoreHtml(store, storeName, dupMap, shortages) {
+  let html = `<div class="clean-store-name">${escapeHtml(storeName)}</div><table><thead><tr><th></th>`;
+  DAYS.forEach((d, day) => {
+    const amS = shortages[cellKey(day, 'AM')], pmS = shortages[cellKey(day, 'PM')];
+    const warn = (amS && amS.length) || (pmS && pmS.length);
+    html += `<th${warn ? ' class="warn-day"' : ''}>${d}${warn ? ' ⚠' : ''}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+  AMPM.forEach((ampm) => {
+    html += `<tr><td class="clean-ampm">${ampm}</td>`;
+    DAYS.forEach((d, day) => {
+      const closed = getClosed(store, day, ampm);
+      html += '<td>';
+      if (closed) {
+        html += '<div class="slot-closed-label">休業</div>';
+      } else {
+        const entries = getCell(store, day, ampm);
+        const dup = dupMap[cellKey(day, ampm)] || new Set();
+        html += '<ul class="clean-bullet">';
+        entries.forEach((entry) => {
+          const isDup = dup.has(entry.staffName);
+          const timeLabel = entry.startTime || entry.endTime ? ` <span class="clean-time">${entry.startTime || '?'}〜${entry.endTime || '?'}</span>` : '';
+          html += `<li${isDup ? ' class="dup"' : ''}>・${escapeHtml(entry.staffName)}${timeLabel}</li>`;
+        });
+        html += '</ul>';
+      }
+      html += '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function buildCleanExtraHtml() {
+  let html = '<div class="clean-extra-title">送迎・事務・ヘルプ</div><table><thead><tr><th></th>';
+  DAYS.forEach((d) => { html += `<th colspan="2">${d}</th>`; });
+  html += '</tr><tr><th></th>';
+  DAYS.forEach(() => { html += '<th style="font-size:10px;">AM</th><th style="font-size:10px;">PM</th>'; });
+  html += '</tr></thead><tbody>';
+  EXTRA_CATEGORIES.forEach((cat) => {
+    html += `<tr><td style="font-weight:700;background:#f5f5f5;text-align:center;">${cat}</td>`;
+    DAYS.forEach((d, day) => {
+      AMPM.forEach((ampm) => {
+        const entries = getExtra(day, ampm, cat);
+        html += '<td>' + entries.map((e) => escapeHtml(e.staffName)).join('<br>') + '</td>';
+      });
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
 /* ---------- イベント: シフト表セル ---------- */
 function onAddToCell(e) {
   const sel = e.target;
@@ -434,6 +554,11 @@ function onChipClick(e) {
 function onStoreNameInput(e) {
   const store = e.target.dataset.store;
   state.current[store === 'A' ? 'storeAName' : 'storeBName'] = e.target.value;
+}
+function onToggleClosed(e) {
+  const store = e.target.dataset.store, day = Number(e.target.dataset.day), ampm = e.target.dataset.ampm;
+  setClosed(store, day, ampm, e.target.checked);
+  renderShiftArea();
 }
 
 /* ---------- イベント: 送迎・事務・ヘルプ ---------- */
@@ -505,10 +630,11 @@ function clearTimeEditor() {
   renderShiftArea();
 }
 
-/* ---------- スタッフ・役職 管理パネル ---------- */
+/* ---------- スタッフ・役職・ルール 管理パネル ---------- */
 function renderAdminTables() {
   renderRolesTable();
   renderStaffTable();
+  renderMinRulesTable();
 }
 function renderRolesTable() {
   const tbody = document.querySelector('#rolesTable tbody');
@@ -517,7 +643,6 @@ function renderRolesTable() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><input type="text" value="${escapeHtml(role.name)}" data-i="${i}" onInput="onRoleNameInput(event)"></td>
-      <td><input type="number" min="0" value="${role.minCount}" data-i="${i}" onInput="onRoleMinInput(event)"></td>
       <td><button class="small-btn danger" onclick="deleteRole(${i})">削除</button></td>
     `;
     tbody.appendChild(tr);
@@ -543,33 +668,57 @@ function renderStaffTable() {
     tbody.appendChild(tr);
   });
 }
+function renderMinRulesTable() {
+  const tbody = document.querySelector('#minRulesTable tbody');
+  tbody.innerHTML = '';
+  state.minRules.forEach((rule, i) => {
+    const tr = document.createElement('tr');
+    const roleOptions = state.roles.map((r) => `<option value="${escapeHtml(r.name)}" ${rule.role === r.name ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
+    tr.innerHTML = `
+      <td><select data-i="${i}" onchange="onMinRuleChange(event,'role')"><option value="">(選択してください)</option>${roleOptions}</select></td>
+      <td><select data-i="${i}" onchange="onMinRuleChange(event,'store')">
+            <option value="" ${rule.store === '' ? 'selected' : ''}>全店舗</option>
+            <option value="A" ${rule.store === 'A' ? 'selected' : ''}>店舗A(上段)</option>
+            <option value="B" ${rule.store === 'B' ? 'selected' : ''}>店舗B(下段)</option>
+          </select></td>
+      <td><select data-i="${i}" onchange="onMinRuleChange(event,'day')">
+            <option value="" ${rule.day === '' ? 'selected' : ''}>全曜日</option>
+            ${DAYS.map((d, di) => `<option value="${di}" ${String(rule.day) === String(di) ? 'selected' : ''}>${d}</option>`).join('')}
+          </select></td>
+      <td><select data-i="${i}" onchange="onMinRuleChange(event,'ampm')">
+            <option value="" ${rule.ampm === '' ? 'selected' : ''}>両方</option>
+            <option value="AM" ${rule.ampm === 'AM' ? 'selected' : ''}>AM</option>
+            <option value="PM" ${rule.ampm === 'PM' ? 'selected' : ''}>PM</option>
+          </select></td>
+      <td><input type="number" min="0" value="${rule.minCount}" data-i="${i}" onInput="onMinRuleMinInput(event)"></td>
+      <td><button class="small-btn danger" onclick="deleteMinRule(${i})">削除</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
 
 function onRoleNameInput(e) {
   const i = Number(e.target.dataset.i);
   const oldName = state.roles[i].name;
   const newName = e.target.value;
   state.roles[i].name = newName;
-  // 役職名変更をスタッフ側にも反映
   state.staff.forEach((s) => {
     const idx = s.roles.indexOf(oldName);
     if (idx >= 0) s.roles[idx] = newName;
   });
-  renderShiftArea();
-}
-function onRoleMinInput(e) {
-  const i = Number(e.target.dataset.i);
-  state.roles[i].minCount = Number(e.target.value) || 0;
+  state.minRules.forEach((r) => { if (r.role === oldName) r.role = newName; });
   renderShiftArea();
 }
 function deleteRole(i) {
   const name = state.roles[i].name;
   state.roles.splice(i, 1);
   state.staff.forEach((s) => { s.roles = s.roles.filter((r) => r !== name); });
+  state.minRules = state.minRules.filter((r) => r.role !== name);
   renderAdminTables();
   renderShiftArea();
 }
 function addRole() {
-  state.roles.push({ name: '新しい役職', minCount: 0 });
+  state.roles.push({ name: '新しい役職' });
   renderAdminTables();
 }
 
@@ -578,7 +727,6 @@ function onStaffNameInput(e) {
   const oldName = state.staff[i].name;
   const newName = e.target.value;
   state.staff[i].name = newName;
-  // 割り当て済みデータの氏名も追随させる(未保存分のみ、その場で反映)
   ['A', 'B'].forEach((store) => {
     Object.values(state.cells[store]).forEach((arr) => arr.forEach((entry) => { if (entry.staffName === oldName) entry.staffName = newName; }));
   });
@@ -606,24 +754,60 @@ function addStaff() {
   state.staff.push({ id: 'st' + new Date().getTime() + Math.floor(Math.random() * 1000), name: '新しいスタッフ', roles: [], defaultStart: '', defaultEnd: '', active: true });
   renderAdminTables();
 }
-async function saveStaffAndRoles() {
+
+function onMinRuleChange(e, field) {
+  const i = Number(e.target.dataset.i);
+  state.minRules[i][field] = e.target.value;
+  renderShiftArea();
+}
+function onMinRuleMinInput(e) {
+  const i = Number(e.target.dataset.i);
+  state.minRules[i].minCount = Number(e.target.value) || 0;
+  renderShiftArea();
+}
+function addMinRule() {
+  state.minRules.push({ id: 'r' + new Date().getTime() + Math.floor(Math.random() * 1000), role: '', store: '', day: '', ampm: '', minCount: 1 });
+  renderMinRulesTable();
+}
+function deleteMinRule(i) {
+  state.minRules.splice(i, 1);
+  renderMinRulesTable();
+  renderShiftArea();
+}
+
+async function saveStaffRolesAndRules() {
   setStatus('保存中...');
   const staffPayload = state.staff.map((s) => ({
     id: s.id, name: s.name, roles: s.roles.join(','), defaultStart: s.defaultStart, defaultEnd: s.defaultEnd, active: s.active,
   }));
-  const rolesPayload = state.roles.map((r) => ({ name: r.name, minCount: r.minCount }));
+  const rolesPayload = state.roles.map((r) => ({ name: r.name }));
+  const rulesPayload = state.minRules.map((r) => ({ id: r.id, role: r.role, store: r.store, day: r.day, ampm: r.ampm, minCount: r.minCount }));
   const r1 = await apiPost('saveStaff', { staff: staffPayload });
   const r2 = await apiPost('saveRoles', { roles: rolesPayload });
-  if (!r1.ok || !r2.ok) { toast('保存エラー'); setStatus(''); return; }
-  toast('スタッフ・役職を保存しました');
+  const r3 = await apiPost('saveMinRules', { rules: rulesPayload });
+  if (!r1.ok || !r2.ok || !r3.ok) { toast('保存エラー'); setStatus(''); return; }
+  toast('スタッフ・役職・ルールを保存しました');
   setStatus('');
 }
 
-/* ---------- 画像化 / 印刷 ---------- */
-async function exportImage() {
+/* ---------- 画像化 / 印刷（Excelのようなシンプル表示で出力） ---------- */
+function enterExportMode() {
+  updatePrintMetaText();
+  buildCleanView();
   document.getElementById('metaEditArea').style.display = 'none';
   document.querySelector('.print-only-meta').style.display = 'block';
-  updatePrintMetaText();
+  document.getElementById('editableView').style.display = 'none';
+  document.getElementById('cleanView').style.display = 'block';
+}
+function exitExportMode() {
+  document.getElementById('metaEditArea').style.display = '';
+  document.querySelector('.print-only-meta').style.display = 'none';
+  document.getElementById('editableView').style.display = '';
+  document.getElementById('cleanView').style.display = 'none';
+}
+
+async function exportImage() {
+  enterExportMode();
   try {
     const canvas = await html2canvas(document.getElementById('printArea'), { scale: 2, backgroundColor: '#ffffff' });
     const link = document.createElement('a');
@@ -633,12 +817,11 @@ async function exportImage() {
   } catch (err) {
     toast('画像化エラー: ' + err);
   } finally {
-    document.getElementById('metaEditArea').style.display = '';
-    document.querySelector('.print-only-meta').style.display = 'none';
+    exitExportMode();
   }
 }
 function printShift(mode) {
-  updatePrintMetaText();
+  enterExportMode();
   document.documentElement.classList.remove('print-half', 'print-full');
   document.documentElement.classList.add(mode === 'full' ? 'print-full' : 'print-half');
   const pageStyle = document.getElementById('dynamicPrintPage');
@@ -649,6 +832,7 @@ function printShift(mode) {
 }
 window.addEventListener('afterprint', () => {
   document.documentElement.classList.remove('print-half', 'print-full');
+  exitExportMode();
 });
 
 /* ---------- 初期化 ---------- */
@@ -672,6 +856,7 @@ document.getElementById('titleInput').addEventListener('input', (e) => { state.c
 document.getElementById('commentInput').addEventListener('input', (e) => { state.current.comment = e.target.value; });
 document.getElementById('btnAddRole').addEventListener('click', addRole);
 document.getElementById('btnAddStaff').addEventListener('click', addStaff);
-document.getElementById('btnSaveStaffRoles').addEventListener('click', saveStaffAndRoles);
+document.getElementById('btnAddMinRule').addEventListener('click', addMinRule);
+document.getElementById('btnSaveStaffRoles').addEventListener('click', saveStaffRolesAndRules);
 
 loadInit();
