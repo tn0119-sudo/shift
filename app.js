@@ -9,7 +9,7 @@ let state = {
   roles: [],     // {name}
   minRules: [],  // {id,role,store('' /'A'/'B'),day('' /0-5),ampm('' /'AM'/'PM'),minCount}
   shiftsList: [],
-  current: { id: null, title: '', comment: '', storeAName: '大森', storeBName: '高花', basedOn: '' },
+  current: { id: null, title: '', comment: '', storeAName: '大森', storeBName: '高花', basedOn: '', showExtra: false },
   cells: { A: {}, B: {} },     // key: `${day}_${ampm}` -> [{staffName,startTime,endTime,slotIndex}]
   extra: {},                   // key: `${day}_${ampm}_${cat}` -> [{staffName,slotIndex}]
   closed: { A: {}, B: {} },    // key: `${day}_${ampm}` -> true/false
@@ -119,7 +119,7 @@ async function loadShift(id) {
   state.current = {
     id: meta.id, title: meta.title || '', comment: meta.comment || '',
     storeAName: meta.storeAName || '大森', storeBName: meta.storeBName || '高花',
-    basedOn: meta.basedOn || '',
+    basedOn: meta.basedOn || '', showExtra: meta.showExtra === true || meta.showExtra === 'true' || meta.showExtra === 'TRUE',
   };
   state.cells = { A: {}, B: {} };
   (res.shiftData || []).forEach((r) => {
@@ -159,7 +159,7 @@ async function loadShift(id) {
 function resetCurrentShift(keepStoreNames) {
   const prevA = keepStoreNames ? state.current.storeAName : '大森';
   const prevB = keepStoreNames ? state.current.storeBName : '高花';
-  state.current = { id: null, title: '', comment: '', storeAName: prevA, storeBName: prevB, basedOn: '' };
+  state.current = { id: null, title: '', comment: '', storeAName: prevA, storeBName: prevB, basedOn: '', showExtra: false };
   state.cells = { A: {}, B: {} };
   state.extra = {};
   state.closed = { A: {}, B: {} };
@@ -215,6 +215,7 @@ async function saveShift() {
     storeBName: state.current.storeBName,
     basedOn: state.current.basedOn,
     closedSlots: buildClosedSlotsPayload(),
+    showExtra: !!state.current.showExtra,
     shiftData: buildShiftDataPayload(),
     extraData: buildExtraDataPayload(),
   };
@@ -328,7 +329,6 @@ function renderShiftSelect() {
 function renderShiftArea() {
   document.getElementById('titleInput').value = state.current.title;
   document.getElementById('commentInput').value = state.current.comment;
-  updatePrintMetaText();
 
   const dupMap = computeDuplicateNames();
   const shortA = computeShortages('A');
@@ -340,10 +340,6 @@ function renderShiftArea() {
   renderExtraBlock(document.getElementById('extraBlock'));
 }
 
-function updatePrintMetaText() {
-  document.getElementById('printTitle').textContent = state.current.title || '(無題)';
-  document.getElementById('printComment').textContent = state.current.comment || '';
-}
 
 function renderWarnSummary(shortA, shortB) {
   const box = document.getElementById('warnSummary');
@@ -427,33 +423,45 @@ function renderStoreTable(store, container, dupMap, shortages) {
 }
 
 function renderExtraBlock(container) {
-  let html = '<h3>送迎・事務・ヘルプ（両店舗共通）</h3><table class="extra-table"><thead><tr><th></th>';
-  DAYS.forEach((d) => { html += `<th colspan="2">${d}</th>`; });
-  html += '</tr><tr><th></th>';
-  DAYS.forEach(() => { html += '<th style="font-size:10px;">AM</th><th style="font-size:10px;">PM</th>'; });
-  html += '</tr></thead><tbody>';
+  const shown = !!state.current.showExtra;
+  let html = `
+    <div class="extra-toggle-row">
+      <h3>送迎・事務・ヘルプ（両店舗共通）</h3>
+      <button type="button" class="extra-toggle-btn" onclick="onToggleExtraVisible()">${shown ? '－ 隠す' : '＋ 表示する'}</button>
+    </div>`;
+  if (shown) {
+    html += '<table class="extra-table"><thead><tr><th></th>';
+    DAYS.forEach((d) => { html += `<th colspan="2">${d}</th>`; });
+    html += '</tr><tr><th></th>';
+    DAYS.forEach(() => { html += '<th style="font-size:9px;">AM</th><th style="font-size:9px;">PM</th>'; });
+    html += '</tr></thead><tbody>';
 
-  EXTRA_CATEGORIES.forEach((cat) => {
-    html += `<tr><td class="cat-cell">${cat}</td>`;
-    DAYS.forEach((d, day) => {
-      AMPM.forEach((ampm) => {
-        const entries = getExtra(day, ampm, cat);
-        html += '<td>';
-        entries.forEach((entry, idx) => {
-          html += `
-            <div class="staff-chip" data-day="${day}" data-ampm="${ampm}" data-cat="${cat}" data-idx="${idx}">
-              <div class="chip-name">${escapeHtml(entry.staffName)}</div>
-              <div class="chip-del" onclick="onExtraDelete(event)">×</div>
-            </div>`;
+    EXTRA_CATEGORIES.forEach((cat) => {
+      html += `<tr><td class="cat-cell">${cat}</td>`;
+      DAYS.forEach((d, day) => {
+        AMPM.forEach((ampm) => {
+          const entries = getExtra(day, ampm, cat);
+          html += '<td>';
+          entries.forEach((entry, idx) => {
+            html += `
+              <div class="staff-chip" data-day="${day}" data-ampm="${ampm}" data-cat="${cat}" data-idx="${idx}">
+                <div class="chip-name">${escapeHtml(entry.staffName)}</div>
+                <div class="chip-del" onclick="onExtraDelete(event)">×</div>
+              </div>`;
+          });
+          html += `<select class="add-select" data-day="${day}" data-ampm="${ampm}" data-cat="${cat}" onchange="onAddToExtra(event)">${staffOptionListHtml('＋')}</select>`;
+          html += '</td>';
         });
-        html += `<select class="add-select" data-day="${day}" data-ampm="${ampm}" data-cat="${cat}" onchange="onAddToExtra(event)">${staffOptionListHtml('＋')}</select>`;
-        html += '</td>';
       });
+      html += '</tr>';
     });
-    html += '</tr>';
-  });
-  html += '</tbody></table>';
+    html += '</tbody></table>';
+  }
   container.innerHTML = html;
+}
+function onToggleExtraVisible() {
+  state.current.showExtra = !state.current.showExtra;
+  renderShiftArea();
 }
 
 /* ---------- 描画: 画像・印刷用のシンプル表示 ---------- */
@@ -465,7 +473,7 @@ function buildCleanView() {
   html += `<div class="clean-title">${escapeHtml(state.current.title || '(無題)')}</div>`;
   if (state.current.comment) html += `<div class="clean-comment">${escapeHtml(state.current.comment)}</div>`;
   html += buildCleanStoreHtml('A', state.current.storeAName, dupMap, shortA);
-  html += buildCleanExtraHtml();
+  if (state.current.showExtra) html += buildCleanExtraHtml();
   html += buildCleanStoreHtml('B', state.current.storeBName, dupMap, shortB);
   document.getElementById('cleanView').innerHTML = html;
 }
@@ -792,16 +800,13 @@ async function saveStaffRolesAndRules() {
 
 /* ---------- 画像化 / 印刷（Excelのようなシンプル表示で出力） ---------- */
 function enterExportMode() {
-  updatePrintMetaText();
   buildCleanView();
   document.getElementById('metaEditArea').style.display = 'none';
-  document.querySelector('.print-only-meta').style.display = 'block';
   document.getElementById('editableView').style.display = 'none';
   document.getElementById('cleanView').style.display = 'block';
 }
 function exitExportMode() {
   document.getElementById('metaEditArea').style.display = '';
-  document.querySelector('.print-only-meta').style.display = 'none';
   document.getElementById('editableView').style.display = '';
   document.getElementById('cleanView').style.display = 'none';
 }
